@@ -9,76 +9,56 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
-
+      
     steps:
-    - name: Checkout repository
+    - name: Checkout
       uses: actions/checkout@v4
 
     - name: Install dependencies
       run: |
         sudo apt update
-        sudo apt -y install build-essential openssl curl wget busybox unzip zip
+        sudo apt -y install build-essential openssl curl wget busybox unzip
 
-    - name: Prepare sign tools (Unisoc / Spreadtrum)
+    - name: Prepare tools
       run: |
-        mkdir -p work
+        mkdir work
         git clone https://github.com/TomKing062/vendor_sprd_proprietories-source_packimage.git
         cp -a vendor_sprd_proprietories-source_packimage/sign_image/config-unisoc work/
         cp vendor_sprd_proprietories-source_packimage/sign_image/v2/sign_image_v1.sh work/
-
-        # 编译 get-raw-image
         gcc -o work/get-raw-image vendor_sprd_proprietories-source_packimage/sign_image/get-raw-image.c
-
-        # 编译 insertheader
-        cd vendor_sprd_proprietories-source_packimage/sign_image/v2/insertheader
-        make
+        cd vendor_sprd_proprietories-source_packimage/sign_image/v2/insertheader && make
+        cd ../sprd_sign && make
         cd ../../../../
-
-        # 编译 sprd_sign
-        cd vendor_sprd_proprietories-source_packimage/sign_image/v2/sprd_sign
-        make
-        cd ../../../../
-
-        # 复制工具
         cp vendor_sprd_proprietories-source_packimage/sign_image/v2/insertheader/imgheaderinsert work/
         cp vendor_sprd_proprietories-source_packimage/sign_image/v2/sprd_sign/sprd_sign work/
-
         chmod +x work/*
 
-    - name: Download boot.img
+    - name: Patch and Sign boot
       run: |
         cd work
-        curl -L -o boot_original.img "https://github.com/lcbd7poa/action_big_resign_with_magisk/releases/download/24598178687/boot.bin"
-
-    - name: Use your own Magisk files from GitHub (no failure)
-      run: |
-        cd work
-        curl -L -o magiskboot "https://raw.githubusercontent.com/lcbd7poa/action_big_resign_with_magisk/main/lib/x86/libmagiskboot.so"
+        # 下载原始 boot
+        curl -o boot_original.img -L "https://github.com/lcbd7poa/action_big_resign_with_magisk/releases/download/24598178687/boot.bin"
+        
+        # 下载正确的 magiskboot
+        curl -L -o magiskboot "https://github.com/topjohnwu/Magisk/releases/latest/download/magiskboot"
         chmod +x magiskboot
-
-    - name: Magisk patch boot
-      run: |
-        cd work
+        
+        # 开始修补
         ./magiskboot unpack boot_original.img
         ./magiskboot patch
         ./magiskboot repack boot_original.img boot_magisk.img
         ./magiskboot cleanup
-
-    - name: Process image for signing
-      run: |
-        cd work
+        
+        # 处理镜像
         mv boot_magisk.img boot.bin
         ./get-raw-image boot.bin
         truncate -s 35M boot.raw
-
-    - name: Sign boot with Unisoc key
-      run: |
-        cd work
+        
+        # 签名
         bash sign_image_v1.sh
-
-    - name: Prepare final output
-      run: |
-        cp work/boot-sign.bin ./magisk-root-signed-boot.img
+        
+        # 输出最终文件
+        cp boot-sign.bin ../magisk-root-signed-boot.img
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
@@ -86,8 +66,8 @@ jobs:
         name: magisk-root-signed-boot
         path: magisk-root-signed-boot.img
 
-    - name: Release to GitHub
-      uses: softprops/action-h-release@v1
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
       with:
         files: magisk-root-signed-boot.img
         tag_name: ${{ github.run_number }}
