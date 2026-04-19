@@ -9,13 +9,12 @@ on:
 
 jobs:
   build:
-    # 👇 就改这一行！立刻不卡！
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v4
 
-    - name: 从本地Magisk-v23.0.apk提取magiskboot + 修补 + 展讯签名
+    - name: 修补boot + 展讯签名
       run: |
         sudo apt update
         sudo apt -y install build-essential openssl curl wget busybox unzip
@@ -37,7 +36,10 @@ jobs:
 
         curl -o boot_original.img -L "${{ github.event.inputs.IMG_URL }}"
 
-        unzip -j ../Magisk-v23.0.apk "lib/arm64-v8a/libmagiskboot.so" -d .
+        # ==============================
+        # 已修复：Magisk v23.0 正确路径
+        # ==============================
+        unzip -j ../Magisk-v23.0.apk "lib/armeabi-v7a/libmagiskboot.so" -d .
         mv libmagiskboot.so magiskboot
         chmod +x magiskboot
 
@@ -54,15 +56,11 @@ jobs:
 
         cp boot-sign.bin ../magisk-root-signed-boot.img
 
-    - name: 上传成品
+    - name: 上传签名后的ROOT boot
       uses: softprops/action-gh-release@v1
       with:
         files: magisk-root-signed-boot.img
         name: UMS312-Magisk-Root-${{ github.run_id }}
         tag_name: ${{ github.run_id }}
-        body: |
-          设备：HLTE217T / UMS312
-          Android 9
-          Magisk：v23.0（本地提取）
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
