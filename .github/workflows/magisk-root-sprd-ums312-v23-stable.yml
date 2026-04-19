@@ -9,7 +9,9 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    # 👇 就改这一行！立刻不卡！
+    runs-on: ubuntu-latest
+
     steps:
     - uses: actions/checkout@v4
 
@@ -33,28 +35,21 @@ jobs:
         chmod +x work/*
         cd work
 
-        # 下载你的 boot
         curl -o boot_original.img -L "${{ github.event.inputs.IMG_URL }}"
 
-        # ==============================================
-        # 关键：从你仓库里的 Magisk-v23.0.apk 本地提取
-        # ==============================================
         unzip -j ../Magisk-v23.0.apk "lib/arm64-v8a/libmagiskboot.so" -d .
         mv libmagiskboot.so magiskboot
         chmod +x magiskboot
 
-        # 修补 ROOT
         ./magiskboot unpack boot_original.img
         ./magiskboot patch
         ./magiskboot repack boot_original.img boot_magisk.img
         ./magiskboot cleanup
 
-        # 展讯格式处理
         mv boot_magisk.img boot.bin
         ./get-raw-image boot.bin
         truncate -s 35M boot.raw
 
-        # 签名
         ./sign_image_v1.sh
 
         cp boot-sign.bin ../magisk-root-signed-boot.img
@@ -68,7 +63,6 @@ jobs:
         body: |
           设备：HLTE217T / UMS312
           Android 9
-          Magisk：v23.0（本地仓库提取）
-          状态：已ROOT + 已签名 + 35M裁剪
+          Magisk：v23.0（本地提取）
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
