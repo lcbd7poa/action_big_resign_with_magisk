@@ -36,11 +36,12 @@ jobs:
     - name: Patch and Sign boot
       run: |
         cd work
+        
         # 下载原始 boot
         curl -o boot_original.img -L "https://github.com/lcbd7poa/action_big_resign_with_magisk/releases/download/24598178687/boot.bin"
         
-        # 下载正确的 magiskboot
-        curl -L -o magiskboot "https://github.com/topjohnwu/Magisk/releases/latest/download/magiskboot"
+        # 下载可用的 magiskboot（修复：使用固定可用地址）
+        wget -O magiskboot "https://raw.githubusercontent.com/topjohnwu/magisk-files/master/v25.2/magiskboot"
         chmod +x magiskboot
         
         # 开始修补
