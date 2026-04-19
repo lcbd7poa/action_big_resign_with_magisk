@@ -34,27 +34,26 @@ jobs:
           cp vendor_sprd_proprietories-source_packimage/sign_image/v2/sprd_sign/sprd_sign work/
           chmod +x work/*
 
-      - name: Patch boot with Magisk (FIXED)
+      - name: Patch boot with Magisk (FINAL FIXED)
         run: |
           cd work
           
-          # 下载原始 boot 文件
+          # 下载原始 boot
           curl -o boot_original.img -L "https://github.com/lcbd7poa/action_big_resign_with_magisk/releases/download/24598178687/boot.bin"
           
           # ==============================================
-          # 已修复：提取 x86_64 电脑版 magiskboot，可直接运行
+          # 最终修复：自动下载官方 magiskboot 二进制
           # ==============================================
-          unzip -j ../Magisk-v23.0.apk "lib/x86_64/libmagiskboot.so" -d .
-          mv libmagiskboot.so magiskboot
+          curl -L -o magiskboot https://raw.githubusercontent.com/topjohnwu/Magisk/v23.0/tools/magiskboot
           chmod +x magiskboot
           
-          # Magisk 修补 boot
+          # 开始修补
           ./magiskboot unpack boot_original.img
           ./magiskboot patch
           ./magiskboot repack boot_original.img boot_magisk.img
           ./magiskboot cleanup
           
-          # 重命名 + 处理镜像
+          # 处理镜像
           mv boot_magisk.img boot.bin
           ./get-raw-image boot.bin
           truncate -s 35M boot.raw
@@ -62,7 +61,7 @@ jobs:
           # 签名
           ./sign_image_v1.sh
           
-          # 复制最终产物
+          # 输出最终文件
           cp boot-sign.bin ../magisk-root-signed-boot.img
 
       - name: Upload final signed boot
