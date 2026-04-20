@@ -1,4 +1,4 @@
-name: Build Unisoc Sign Tools + Magiskboot
+name: Build Resign Tool
 on:
   push:
   workflow_dispatch:
@@ -7,10 +7,9 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install build dependencies
+      - name: Install dependencies
         run: |
           sudo apt update
           sudo apt install -y \
@@ -28,48 +27,55 @@ jobs:
             lld \
             git
 
-      - name: Build Unisoc sign tools
+      # ✅ 修复：安装 Rust 环境（解决 rustc 未找到错误）
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          source $HOME/.cargo/env
+          rustup default stable
+
+      - name: Build Unisoc Sign Tools
         run: |
           mkdir -p work
           git clone https://github.com/TomKing062/vendor_sprd_proprietories-source_packimage.git
           
           cp -a vendor_sprd_proprietories-source_packimage/sign_image/config-unisoc work/
           cp vendor_sprd_proprietories-source_packimage/sign_image/v2/sign_image_v1.sh work/
-
+          
           # 编译 get-raw-image
           gcc -o work/get-raw-image vendor_sprd_proprietories-source_packimage/sign_image/get-raw-image.c -Wno-format
-
+          
           # 编译 imgheaderinsert
           cd vendor_sprd_proprietories-source_packimage/sign_image/v2/insertheader
           make
           cd ../sprd_sign
           make
           cd ../../../../
-
-          # 复制编译好的工具
+          
+          # 复制工具
           cp vendor_sprd_proprietories-source_packimage/sign_image/v2/insertheader/imgheaderinsert work/
           cp vendor_sprd_proprietories-source_packimage/sign_image/v2/sprd_sign/sprd_sign work/
 
       - name: Build magiskboot
         run: |
+          source $HOME/.cargo/env  # 必须加载 Rust 环境
           git clone --depth=1 https://github.com/PinNaCode/magiskboot_build.git
           cd magiskboot_build
           bash scripts/clone_submodules.sh
-
-          # 修复：使用 clang 编译，移除无效 GCC 参数
+          
           CC=clang \
           CXX=clang++ \
           cmake -G Ninja -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DPREFER_STATIC_LINKING=ON \
             -DUSE_CCACHE=OFF
-
+          
           cmake --build build -j$(nproc)
           cp build/magiskboot ../work/magiskboot
           cd ..
 
-      - name: Upload tools
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: unisoc-sign-tools
+          name: resign-tools
           path: work/
