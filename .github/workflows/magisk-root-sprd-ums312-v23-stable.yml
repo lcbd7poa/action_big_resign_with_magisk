@@ -31,33 +31,35 @@ jobs:
       - name: Install Rust
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          # 关键修复：立刻加载 Rust 环境，让当前 shell 识别 rustc
+          source "$HOME/.cargo/env"
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-      - name: Build Spreadtrum signing tools
+      - name: Build Unisoc sign tools
         run: |
           mkdir -p work
           git clone https://github.com/TomKing062/vendor_sprd_proprietories-source_packimage.git
-          
           cp -a vendor_sprd_proprietories-source_packimage/sign_image/config-unisoc work/
           cp vendor_sprd_proprietories-source_packimage/sign_image/v2/sign_image_v1.sh work/
-          
           gcc -o work/get-raw-image vendor_sprd_proprietories-source_packimage/sign_image/get-raw-image.c -Wno-format
-          
           cd vendor_sprd_proprietories-source_packimage/sign_image/v2/insertheader
           make
           cd ../sprd_sign
           make
           cd ../../../../
-          
           cp vendor_sprd_proprietories-source_packimage/sign_image/v2/insertheader/imgheaderinsert work/
           cp vendor_sprd_proprietories-source_packimage/sign_image/v2/sprd_sign/sprd_sign work/
 
       - name: Build magiskboot
         run: |
+          # 关键修复：再次确保 Rust 环境生效
+          source "$HOME/.cargo/env"
+          
           git clone --depth=1 https://github.com/PinNaCode/magiskboot_build.git
           cd magiskboot_build
           bash scripts/clone_submodules.sh
           
+          # 明确指定 rustc 路径，防止找不到
           CC=clang \
           CXX=clang++ \
           cmake -G Ninja -B build \
@@ -70,7 +72,7 @@ jobs:
           cp build/magiskboot ../work/magiskboot
           cd ..
 
-      - name: Upload tools
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: work-tools
