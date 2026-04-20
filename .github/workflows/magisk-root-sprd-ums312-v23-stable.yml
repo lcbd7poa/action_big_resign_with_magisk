@@ -5,7 +5,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,8 +26,6 @@ jobs:
             gcc-multilib \
             clang \
             lld \
-            libc++-dev \
-            libc++abi-dev \
             git
 
       - name: Build Unisoc sign tools
@@ -38,7 +36,7 @@ jobs:
           cp -a vendor_sprd_proprietories-source_packimage/sign_image/config-unisoc work/
           cp vendor_sprd_proprietories-source_packimage/sign_image/v2/sign_image_v1.sh work/
 
-          # 编译 get-raw-image（修复格式警告）
+          # 编译 get-raw-image
           gcc -o work/get-raw-image vendor_sprd_proprietories-source_packimage/sign_image/get-raw-image.c -Wno-format
 
           # 编译 imgheaderinsert
@@ -58,14 +56,13 @@ jobs:
           cd magiskboot_build
           bash scripts/clone_submodules.sh
 
-          # 关键修复：强制使用 GCC + 关闭 libc++
-          CC=gcc \
-          CXX=g++ \
+          # 修复：使用 clang 编译，移除无效 GCC 参数
+          CC=clang \
+          CXX=clang++ \
           cmake -G Ninja -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DPREFER_STATIC_LINKING=ON \
-            -DUSE_CCACHE=OFF \
-            -DCMAKE_CXX_FLAGS="-stdlib=libstdc++"
+            -DUSE_CCACHE=OFF
 
           cmake --build build -j$(nproc)
           cp build/magiskboot ../work/magiskboot
