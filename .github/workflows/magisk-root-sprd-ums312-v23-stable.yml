@@ -1,4 +1,4 @@
-name: Build Resign Tool
+name: Build
 on:
   push:
   workflow_dispatch:
@@ -7,7 +7,8 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Install dependencies
         run: |
@@ -27,14 +28,12 @@ jobs:
             lld \
             git
 
-      # ✅ 修复：安装 Rust 环境（解决 rustc 未找到错误）
       - name: Install Rust
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-          source $HOME/.cargo/env
-          rustup default stable
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-      - name: Build Unisoc Sign Tools
+      - name: Build Spreadtrum signing tools
         run: |
           mkdir -p work
           git clone https://github.com/TomKing062/vendor_sprd_proprietories-source_packimage.git
@@ -42,23 +41,19 @@ jobs:
           cp -a vendor_sprd_proprietories-source_packimage/sign_image/config-unisoc work/
           cp vendor_sprd_proprietories-source_packimage/sign_image/v2/sign_image_v1.sh work/
           
-          # 编译 get-raw-image
           gcc -o work/get-raw-image vendor_sprd_proprietories-source_packimage/sign_image/get-raw-image.c -Wno-format
           
-          # 编译 imgheaderinsert
           cd vendor_sprd_proprietories-source_packimage/sign_image/v2/insertheader
           make
           cd ../sprd_sign
           make
           cd ../../../../
           
-          # 复制工具
           cp vendor_sprd_proprietories-source_packimage/sign_image/v2/insertheader/imgheaderinsert work/
           cp vendor_sprd_proprietories-source_packimage/sign_image/v2/sprd_sign/sprd_sign work/
 
       - name: Build magiskboot
         run: |
-          source $HOME/.cargo/env  # 必须加载 Rust 环境
           git clone --depth=1 https://github.com/PinNaCode/magiskboot_build.git
           cd magiskboot_build
           bash scripts/clone_submodules.sh
@@ -68,14 +63,15 @@ jobs:
           cmake -G Ninja -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DPREFER_STATIC_LINKING=ON \
-            -DUSE_CCACHE=OFF
+            -DUSE_CCACHE=OFF \
+            -DRust_COMPILER=$HOME/.cargo/bin/rustc
           
           cmake --build build -j$(nproc)
           cp build/magiskboot ../work/magiskboot
           cd ..
 
-      - name: Upload artifact
+      - name: Upload tools
         uses: actions/upload-artifact@v4
         with:
-          name: resign-tools
+          name: work-tools
           path: work/
