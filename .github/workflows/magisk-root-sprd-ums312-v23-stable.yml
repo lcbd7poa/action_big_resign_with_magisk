@@ -11,89 +11,89 @@ jobs:
       contents: write
       
     steps:
-    - name: Checkout
+    - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Install base dependencies
+    - name: Install system dependencies
       run: |
         sudo apt update
         sudo apt -y install build-essential openssl curl wget busybox unzip
+        sudo apt install -y clang rustc cargo cmake ninja-build pkg-config
+        sudo apt install -y liblzma-dev liblz4-dev libbz2-dev zlib1g-dev
 
-    - name: Install magiskboot build dependencies
-      run: |
-        sudo apt install -y \
-          clang \
-          rustc \
-          cargo \
-          cmake \
-          ninja-build \
-          pkg-config \
-          liblzma-dev \
-          liblz4-dev \
-          libbz2-dev \
-          zlib1g-dev
+    - name: Prepare work directory
+      run: mkdir -p work
 
-    - name: Prepare tools & compile magiskboot from source
+    - name: Clone Spreadtrum signing tools
       run: |
-        mkdir work
-        
-        # 编译工具：展讯签名相关
         git clone https://github.com/TomKing062/vendor_sprd_proprietories-source_packimage.git
         cp -a vendor_sprd_proprietories-source_packimage/sign_image/config-unisoc work/
         cp vendor_sprd_proprietories-source_packimage/sign_image/v2/sign_image_v1.sh work/
+        
+        # Compile get-raw-image
         gcc -o work/get-raw-image vendor_sprd_proprietories-source_packimage/sign_image/get-raw-image.c
-        cd vendor_sprd_proprietories-source_packimage/sign_image/v2/insertheader && make
-        cd ../sprd_sign && make
+        
+        # Compile imgheaderinsert
+        cd vendor_sprd_proprietories-source_packimage/sign_image/v2/insertheader
+        make
+        cd ../sprd_sign
+        make
         cd ../../../../
+        
+        # Copy compiled tools
         cp vendor_sprd_proprietories-source_packimage/sign_image/v2/insertheader/imgheaderinsert work/
         cp vendor_sprd_proprietories-source_packimage/sign_image/v2/sprd_sign/sprd_sign work/
-        chmod +x work/*
 
-        # 从完整源码编译 magiskboot（永不失效）
+    - name: Build magiskboot from source
+      run: |
         git clone --depth=1 https://github.com/PinNaCode/magiskboot_build.git
         cd magiskboot_build
         bash scripts/clone_submodules.sh
         CC=clang CXX=clang++ cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release -DPREFER_STATIC_LINKING=ON
         cmake --build build -j$(nproc)
         cp build/magiskboot ../work/magiskboot
-        chmod +x ../work/magiskboot
         cd ..
 
-    - name: Patch and Sign boot
+    - name: Make all tools executable
+      run: |
+        chmod -R +x work/*
+
+    - name: Patch boot with Magisk and sign
       run: |
         cd work
         
-        # 下载原始 boot
+        # Download original boot image
         curl -o boot_original.img -L "https://github.com/lcbd7poa/action_big_resign_with_magisk/releases/download/24598178687/boot.bin"
         
-        # 开始修补（magiskboot 已本地编译好，无需下载）
+        # Magisk unpack + patch + repack
         ./magiskboot unpack boot_original.img
         ./magiskboot patch
         ./magiskboot repack boot_original.img boot_magisk.img
         ./magiskboot cleanup
         
-        # 处理镜像
+        # Process raw image
         mv boot_magisk.img boot.bin
         ./get-raw-image boot.bin
         truncate -s 35M boot.raw
         
-        # 展讯签名
+        # Spreadtrum official signing
         bash sign_image_v1.sh
         
-        # 输出最终文件
+        # Copy final signed boot
         cp boot-sign.bin ../magisk-root-signed-boot.img
 
-    - name: Upload artifact
+    - name: Upload final boot image
       uses: actions/upload-artifact@v4
       with:
         name: magisk-root-signed-boot
         path: magisk-root-signed-boot.img
 
-    - name: Create Release
+    - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
+      if: success()
       with:
         files: magisk-root-signed-boot.img
         tag_name: ${{ github.run_number }}
-        name: Magisk Root Signed Boot
+        name: Magisk Root Signed Boot (Spreadtrum Signed)
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GHR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
