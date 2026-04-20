@@ -14,14 +14,30 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Install dependencies
+    - name: Install base dependencies
       run: |
         sudo apt update
         sudo apt -y install build-essential openssl curl wget busybox unzip
 
-    - name: Prepare tools
+    - name: Install magiskboot build dependencies
+      run: |
+        sudo apt install -y \
+          clang \
+          rustc \
+          cargo \
+          cmake \
+          ninja-build \
+          pkg-config \
+          liblzma-dev \
+          liblz4-dev \
+          libbz2-dev \
+          zlib1g-dev
+
+    - name: Prepare tools & compile magiskboot from source
       run: |
         mkdir work
+        
+        # 编译工具：展讯签名相关
         git clone https://github.com/TomKing062/vendor_sprd_proprietories-source_packimage.git
         cp -a vendor_sprd_proprietories-source_packimage/sign_image/config-unisoc work/
         cp vendor_sprd_proprietories-source_packimage/sign_image/v2/sign_image_v1.sh work/
@@ -33,6 +49,16 @@ jobs:
         cp vendor_sprd_proprietories-source_packimage/sign_image/v2/sprd_sign/sprd_sign work/
         chmod +x work/*
 
+        # 从完整源码编译 magiskboot（永不失效）
+        git clone --depth=1 https://github.com/PinNaCode/magiskboot_build.git
+        cd magiskboot_build
+        bash scripts/clone_submodules.sh
+        CC=clang CXX=clang++ cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release -DPREFER_STATIC_LINKING=ON
+        cmake --build build -j$(nproc)
+        cp build/magiskboot ../work/magiskboot
+        chmod +x ../work/magiskboot
+        cd ..
+
     - name: Patch and Sign boot
       run: |
         cd work
@@ -40,11 +66,7 @@ jobs:
         # 下载原始 boot
         curl -o boot_original.img -L "https://github.com/lcbd7poa/action_big_resign_with_magisk/releases/download/24598178687/boot.bin"
         
-        # 下载可用的 magiskboot（修复：使用固定可用地址）
-        wget -O magiskboot "https://raw.githubusercontent.com/topjohnwu/magisk-files/master/v25.2/magiskboot"
-        chmod +x magiskboot
-        
-        # 开始修补
+        # 开始修补（magiskboot 已本地编译好，无需下载）
         ./magiskboot unpack boot_original.img
         ./magiskboot patch
         ./magiskboot repack boot_original.img boot_magisk.img
@@ -55,7 +77,7 @@ jobs:
         ./get-raw-image boot.bin
         truncate -s 35M boot.raw
         
-        # 签名
+        # 展讯签名
         bash sign_image_v1.sh
         
         # 输出最终文件
