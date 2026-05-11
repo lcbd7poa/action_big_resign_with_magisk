@@ -21,13 +21,13 @@ jobs:
       image: ghcr.io/catthehacker/ubuntu:runner-20.04
     steps:
     
-    - name: Checkout
+    - name: Checkout repo
       uses: actions/checkout@v4
       with:
         ref: a9_boot_with_recovery_cpio
         path: main
 
-    - name: Setup SSH Keys
+    - name: Setup SSH
       if: ${{ startsWith(github.event.inputs.EXTRA_KEY_TREE_URL, 'git@github.com') }}
       uses: webfactory/ssh-agent@v0.9.0
       with:
@@ -35,43 +35,43 @@ jobs:
             ${{ secrets.SSH_PRIVATE_KEY }}
 
     - name: Clone extra keys
-      if: |
-        github.event.inputs.EXTRA_KEY_TREE_URL != null
-        && github.event.inputs.EXTRA_KEY_BRANCH != null
+      if: inputs.EXTRA_KEY_TREE_URL != '' && inputs.EXTRA_KEY_BRANCH != ''
       run: |
         git clone ${{ github.event.inputs.EXTRA_KEY_TREE_URL }} -b ${{ github.event.inputs.EXTRA_KEY_BRANCH }} ./extra_key
 
-    - name: patch & sign
+    - name: Patch & Sign
       run: |
         sudo apt update
         sudo apt -y install build-essential python2 python2-dev openssl curl wget busybox
-        
         wget https://bootstrap.pypa.io/pip/2.7/get-pip.py
         sudo python2 get-pip.py
         pip2 install pycryptodome
-        
-        curl -o original.zip -L "${{ github.event.inputs.ZIP_URL }}"
-        curl -o avbtool.tgz -L "https://android.googlesource.com/platform/external/avb/+archive/refs/heads/pie-release.tar.gz"
-        
+
+        # 下载固件
+        curl -fo original.zip -L "${{ github.event.inputs.ZIP_URL }}"
+
+        # 下载 avbtool
+        curl -fo avbtool.tgz -L "https://android.googlesource.com/platform/external/avb/+archive/refs/heads/pie-release.tar.gz"
+
         # ==========================================
-        # 🔥 直接使用你仓库里的 Magisk-v26.4.apk
+        # 🔥 强制使用你仓库里的 Magisk-v26.4.apk
         # ==========================================
-        cp main/Magisk-v26.4.apk magisk.apk
-        
-        wget https://raw.githubusercontent.com/magojohnji/magiskboot-linux/main/x86_64/magiskboot
+        cp -v main/Magisk-v26.4.apk magisk.apk
+
+        # 下载 magiskboot
+        wget -O magiskboot https://raw.githubusercontent.com/magojohnji/magiskboot-linux/main/x86_64/magiskboot
         chmod +x magiskboot
-        
+
+        # 运行脚本
         chmod +x main/*.sh
         mv main/sign.sh ./
         ./sign.sh
 
-    - name: Upload to Release
+    - name: Upload
       uses: softprops/action-gh-release@v1
       with:
         files: resigned.zip
         name: ${{ github.run_id }}
         tag_name: ${{ github.run_id }}
-        body: |
-          URL: ${{ github.event.inputs.ZIP_URL }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
