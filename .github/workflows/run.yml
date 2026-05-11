@@ -1,62 +1,54 @@
-name: resign
-
+name: FactoryResign
 on:
   workflow_dispatch:
     inputs:
-      ZIP_URL:    
-        description: '固件 ZIP 地址'
+      ZIP_URL:
+        description: "固件下载地址"
         required: true
-        default: ''
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/catthehacker/ubuntu:runner-20.04
+    container: ghcr.io/catthehacker/ubuntu:runner-20.04
     steps:
-    
-    - name: Checkout
-      uses: actions/checkout@v4
-      with:
-        ref: a9_boot_with_recovery_cpio
-        path: main
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: a9_boot_with_recovery_cpio
+          path: main
 
-    - name: 安装依赖
-      run: |
-        sudo apt update
-        sudo apt -y install build-essential python2 python2-dev openssl curl wget
-        wget https://bootstrap.pypa.io/pip/2.7/get-pip.py
-        sudo python2 get-pip.py
-        pip2 install pycryptodome
+      - name: 安装依赖
+        run: |
+          sudo apt update
+          sudo apt install -y python2 python2-dev build-essential wget curl openssl
+          wget https://bootstrap.pypa.io/pip/2.7/get-pip.py
+          sudo python2 get-pip.py
+          pip2 install pycryptodome
 
-    - name: 下载固件
-      run: |
-        curl -fo original.zip -L "${{ github.event.inputs.ZIP_URL }}"
+      - name: 下载固件
+        run: |
+          curl -fo original.zip -L "${{ github.event.inputs.ZIP_URL }}"
 
-    - name: 下载工具
-      run: |
-        # avbtool
-        curl -fo avbtool.tgz -L "https://android.googlesource.com/platform/external/avb/+archive/refs/heads/pie-release.tar.gz"
-        
-        # magiskboot
-        wget -O magiskboot https://raw.githubusercontent.com/magojohnji/magiskboot-linux/main/x86_64/magiskboot
-        chmod +x magiskboot
+      - name: 准备工具
+        run: |
+          curl -fo avbtool.tgz -L "https://android.googlesource.com/platform/external/avb/+archive/refs/heads/pie-release.tar.gz"
+          wget -O magiskboot https://raw.githubusercontent.com/magojohnji/magiskboot-linux/main/x86_64/magiskboot
+          chmod +x magiskboot
 
-    - name: 🔥 强制使用仓库内 Magisk-v26.4（不会再下载！）
-      run: |
-        cp -v main/Magisk-v26.4.apk magisk.apk
+      - name: 使用仓库内置 Magisk-v26.4 (绝对不会下载)
+        run: |
+          cp main/Magisk-v26.4.apk magisk.apk
 
-    - name: 运行签名脚本
-      run: |
-        chmod +x main/sign.sh
-        mv main/sign.sh ./
-        ./sign.sh
+      - name: 运行签名脚本
+        run: |
+          chmod +x main/sign.sh
+          mv main/sign.sh ./
+          ./sign.sh
 
-    - name: 上传结果
-      uses: softprops/action-gh-release@v1
-      with:
-        files: resigned.zip
-        name: ${{ github.run_id }}
-        tag_name: ${{ github.run_id }}
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: 上传结果
+        uses: softprops/action-gh-release@v1
+        with:
+          files: resigned.zip
+          tag_name: ${{ github.run_id }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
