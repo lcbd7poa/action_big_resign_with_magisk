@@ -3,7 +3,7 @@ name: resign
 on:
   workflow_dispatch:
     inputs:
-      ZIP_URL:    
+      ZIP_URL:
         description: 'URL of (splloader)+uboot+sml+trustos+(teecfg)+vbmeta+boot+(recovery) (all end with .bin)'
         required: true
         default: ''
@@ -20,52 +20,59 @@ jobs:
     container:
       image: ghcr.io/catthehacker/ubuntu:runner-20.04
     steps:
-    
-    - name: Checkout
-      uses: actions/checkout@v4
-      with:
-        ref: main
-        path: main
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main
 
-    - name: Setup SSH Keys
-      if: ${{ startsWith(github.event.inputs.EXTRA_KEY_TREE_URL, 'git@github.com') }}
-      uses: webfactory/ssh-agent@v0.9.0
-      with:
+      - name: Setup SSH Keys
+        if: ${{ startsWith(github.event.inputs.EXTRA_KEY_TREE_URL, 'git@github.com') }}
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
           ssh-private-key: |
             ${{ secrets.SSH_PRIVATE_KEY }}
 
-    - name: Clone extra keys
-      if: |
-        github.event.inputs.EXTRA_KEY_TREE_URL != null
-        && github.event.inputs.EXTRA_KEY_BRANCH != null
-      run: |
-        git clone ${{ github.event.inputs.EXTRA_KEY_TREE_URL }} -b ${{ github.event.inputs.EXTRA_KEY_BRANCH }} ./extra_key
+      - name: Clone extra keys
+        if: |
+          github.event.inputs.EXTRA_KEY_TREE_URL != null
+          && github.event.inputs.EXTRA_KEY_BRANCH != null
+        run: |
+          git clone ${{ github.event.inputs.EXTRA_KEY_TREE_URL }} -b ${{ github.event.inputs.EXTRA_KEY_BRANCH }} ./extra_key
 
-    - name: patch
-      run: |
-        sudo apt update
-        sudo apt -y install build-essential python openssl curl wget busybox
-        wget https://bootstrap.pypa.io/pip/2.7/get-pip.py && sudo python2.7 get-pip.py
-        pip2 install pycryptodome
-        curl -o original.zip -L "${{ github.event.inputs.ZIP_URL }}"
-        curl -o avbtool.tgz -L "https://android.googlesource.com/platform/external/avb/+archive/refs/heads/pie-release.tar.gz"
-         # 固定使用 Magisk v26.4
-        curl -o magisk.apk -L "https://github.com/topjohnwu/Magisk/releases/download/v26.4/Magisk-v26.4.apk"
-        # curl -o magisk.apk -L $(curl -s https://api.github.com/repos/topjohnwu/Magisk/releases | grep -Po -m 1 '(?<=download_url\"\: \").*Magisk.*Magisk.*apk')
-        wget https://raw.githubusercontent.com/magojohnji/magiskboot-linux/main/x86_64/magiskboot
-        chmod +x magiskboot
-        chmod +x main/*.sh
-        mv main/sign.sh ./
-        ./sign.sh
+      - name: patch & sign
+        run: |
+          sudo apt update
+          sudo apt -y install build-essential python2 python2-dev openssl curl wget busybox
+          
+          # Install pip2 for python2
+          wget https://bootstrap.pypa.io/pip/2.7/get-pip.py
+          sudo python2 get-pip.py
+          pip2 install pycryptodome
+          
+          # Download firmware & tools
+          curl -o original.zip -L "${{ github.event.inputs.ZIP_URL }}"
+          curl -o avbtool.tgz -L "https://android.googlesource.com/platform/external/avb/+archive/refs/heads/pie-release.tar.gz"
+          
+          # Fixed Magisk 26.4
+          curl -o magisk.apk -L "https://github.com/topjohnwu/Magisk/releases/download/v26.4/Magisk-v26.4.apk"
+          
+          # magiskboot
+          wget https://raw.githubusercontent.com/magojohnji/magiskboot-linux/main/x86_64/magiskboot
+          chmod +x magiskboot
+          
+          # Run sign script
+          chmod +x main/*.sh
+          mv main/sign.sh ./
+          ./sign.sh
 
-    - name: Upload to Release
-      uses: softprops/action-gh-release@v1
-      with:
-        files: | 
-          resigned.zip
-        name: ${{ github.run_id }}
-        tag_name: ${{ github.run_id }}
-        body: |
-          URL: ${{ github.event.inputs.ZIP_URL }}
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload to Release
+        uses: softprops/gh-release@v1
+        with:
+          files: resigned.zip
+          name: ${{ github.run_id }}
+          tag_name: ${{ github.run_id }}
+          body: |
+            URL: ${{ github.event.inputs.ZIP_URL }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
