@@ -44,18 +44,69 @@ jobs:
     - name: patch
       run: |
         sudo apt update
-        sudo apt -y install build-essential python openssl curl wget busybox
+        sudo apt -y install build-essential python openssl curl wget busybox unzip zip
         wget https://bootstrap.pypa.io/pip/2.7/get-pip.py && sudo python2.7 get-pip.py
         pip2 install pycryptodome
         curl -o original.zip -L "${{ github.event.inputs.ZIP_URL }}"
         curl -o avbtool.tgz -L "https://android.googlesource.com/platform/external/avb/+archive/refs/heads/pie-release.tar.gz"
-        # curl -o magisk.apk -L "https://github.com/topjohnwu/Magisk/releases/download/v30.7/Magisk-v30.7.apk"
         curl -4 -o magisk.apk -L "https://github.com/topjohnwu/Magisk/releases/download/v26.4/Magisk-v26.4.apk"
-        # curl -o magisk.apk -L $(curl -s https://api.github.com/repos/topjohnwu/Magisk/releases | grep -Po -m 1 '(?<=download_url\"\: \").*Magisk.*Magisk.*apk')
         wget https://raw.githubusercontent.com/magojohnji/magiskboot-linux/main/x86_64/magiskboot
         chmod +x magiskboot
         chmod +x main/*.sh
         mv main/sign.sh ./
+        
+        # ============================================
+        # 修复 Magisk 库文件提取问题
+        # ============================================
+        echo "=== Fixing Magisk library extraction ==="
+        
+        # 创建临时目录解压 Magisk APK
+        mkdir -p magisk_extract
+        unzip -q magisk.apk -d magisk_extract
+        
+        # 查找 libmagisk.so 的实际位置
+        echo "Searching for libmagisk.so..."
+        find magisk_extract -name "libmagisk.so" -type f
+        
+        # 创建 boot_patch.sh 期望的目录结构
+        mkdir -p boot/zzz/lib/arm64-v8a/
+        
+        # 复制必要的库文件到正确位置
+        if [ -f magisk_extract/lib/arm64-v8a/libmagisk.so ]; then
+            cp magisk_extract/lib/arm64-v8a/libmagisk.so boot/zzz/lib/arm64-v8a/
+            echo "Copied libmagisk.so"
+        elif [ -f magisk_extract/lib/x86_64/libmagisk.so ]; then
+            cp magisk_extract/lib/x86_64/libmagisk.so boot/zzz/lib/arm64-v8a/
+            echo "Copied libmagisk.so from x86_64"
+        fi
+        
+        # 复制 libmagisk32.so (如果存在)
+        if [ -f magisk_extract/lib/armeabi-v7a/libmagisk32.so ]; then
+            cp magisk_extract/lib/armeabi-v7a/libmagisk32.so boot/zzz/lib/arm64-v8a/
+            echo "Copied libmagisk32.so"
+        fi
+        
+        # 复制 libinit-ld.so (如果存在)
+        if [ -f magisk_extract/lib/arm64-v8a/libinit-ld.so ]; then
+            cp magisk_extract/lib/arm64-v8a/libinit-ld.so boot/zzz/lib/arm64-v8a/
+            echo "Copied libinit-ld.so"
+        fi
+        
+        # 复制 magiskboot 到期望位置
+        cp magiskboot boot/zzz/
+        chmod +x boot/zzz/magiskboot
+        
+        # 复制整个 lib 目录作为备份
+        cp -r magisk_extract/lib boot/zzz/ 2>/dev/null || true
+        
+        # 清理临时目录
+        rm -rf magisk_extract
+        
+        echo "=== Magisk library fix completed ==="
+        echo "Contents of boot/zzz/lib/arm64-v8a/:"
+        ls -la boot/zzz/lib/arm64-v8a/ 2>/dev/null || echo "Directory not found"
+        
+        # 运行签名脚本
         ./sign.sh
 
     - name: Upload to Release
@@ -69,3 +120,12 @@ jobs:
           URL: ${{ github.event.inputs.ZIP_URL }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Upload artifacts (backup)
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: output-${{ github.run_id }}
+        path: |
+          output/
+          resigned.zip
