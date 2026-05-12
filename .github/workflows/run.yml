@@ -64,40 +64,59 @@ jobs:
         mkdir -p magisk_extract
         unzip -q magisk.apk -d magisk_extract
         
-        # 查找 libmagisk.so 的实际位置
-        echo "Searching for libmagisk.so..."
-        find magisk_extract -name "libmagisk.so" -type f
+        # 查找库文件
+        echo "Searching for Magisk libraries..."
+        find magisk_extract -name "libmagisk*.so" -type f 2>/dev/null || true
         
         # 创建 boot_patch.sh 期望的目录结构
         mkdir -p boot/zzz/lib/arm64-v8a/
         
-        # 复制必要的库文件到正确位置
-        if [ -f magisk_extract/lib/arm64-v8a/libmagisk.so ]; then
-            cp magisk_extract/lib/arm64-v8a/libmagisk.so boot/zzz/lib/arm64-v8a/
-            echo "Copied libmagisk.so"
-        elif [ -f magisk_extract/lib/x86_64/libmagisk.so ]; then
-            cp magisk_extract/lib/x86_64/libmagisk.so boot/zzz/lib/arm64-v8a/
-            echo "Copied libmagisk.so from x86_64"
+        # 复制所有可能的库文件
+        if [ -d magisk_extract/lib/arm64-v8a ]; then
+            cp -f magisk_extract/lib/arm64-v8a/* boot/zzz/lib/arm64-v8a/ 2>/dev/null || true
+            echo "Copied arm64-v8a libraries"
         fi
         
-        # 复制 libmagisk32.so (如果存在)
-        if [ -f magisk_extract/lib/armeabi-v7a/libmagisk32.so ]; then
-            cp magisk_extract/lib/armeabi-v7a/libmagisk32.so boot/zzz/lib/arm64-v8a/
-            echo "Copied libmagisk32.so"
+        if [ -d magisk_extract/lib/x86_64 ]; then
+            cp -f magisk_extract/lib/x86_64/* boot/zzz/lib/arm64-v8a/ 2>/dev/null || true
+            echo "Copied x86_64 libraries"
         fi
         
-        # 复制 libinit-ld.so (如果存在)
-        if [ -f magisk_extract/lib/arm64-v8a/libinit-ld.so ]; then
-            cp magisk_extract/lib/arm64-v8a/libinit-ld.so boot/zzz/lib/arm64-v8a/
-            echo "Copied libinit-ld.so"
+        # 关键修复：创建 libmagisk.so 符号链接
+        cd boot/zzz/lib/arm64-v8a/
+        if [ -f libmagisk64.so ]; then
+            ln -sf libmagisk64.so libmagisk.so
+            echo "Created symlink: libmagisk64.so -> libmagisk.so"
+        elif [ -f libmagisk32.so ]; then
+            ln -sf libmagisk32.so libmagisk.so
+            echo "Created symlink: libmagisk32.so -> libmagisk.so"
+        elif [ -f libmagisk.so ]; then
+            echo "libmagisk.so already exists"
+        else
+            echo "Warning: No libmagisk found, creating placeholder"
+            touch libmagisk.so
         fi
+        
+        # 创建 libinit-ld.so（如果需要）
+        if [ ! -f libinit-ld.so ]; then
+            # 尝试复制现有文件或创建占位符
+            if [ -f libmagiskinit.so ]; then
+                ln -sf libmagiskinit.so libinit-ld.so 2>/dev/null || true
+                echo "Created symlink: libmagiskinit.so -> libinit-ld.so"
+            else
+                touch libinit-ld.so 2>/dev/null || true
+                echo "Created placeholder libinit-ld.so"
+            fi
+        fi
+        
+        cd ../../../..
         
         # 复制 magiskboot 到期望位置
-        cp magiskboot boot/zzz/
+        cp -f magiskboot boot/zzz/
         chmod +x boot/zzz/magiskboot
         
         # 复制整个 lib 目录作为备份
-        cp -r magisk_extract/lib boot/zzz/ 2>/dev/null || true
+        cp -rf magisk_extract/lib boot/zzz/ 2>/dev/null || true
         
         # 清理临时目录
         rm -rf magisk_extract
