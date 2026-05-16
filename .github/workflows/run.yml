@@ -1,4 +1,4 @@
-name: resign-magisk-24.3
+name: resign
 
 on:
   workflow_dispatch:
@@ -13,13 +13,6 @@ on:
       EXTRA_KEY_BRANCH:
         description: 'EXTRA_KEY_BRANCH (leave blank if you only use unisoc keys)'
         required: false
-      BOOT_DEVICE:
-        description: 'Boot device type (A-only or A/B)'
-        required: false
-        default: 'A-only'
-        options:
-          - 'A-only'
-          - 'A/B'
 
 jobs:
   build:
@@ -48,185 +41,29 @@ jobs:
       run: |
         git clone ${{ github.event.inputs.EXTRA_KEY_TREE_URL }} -b ${{ github.event.inputs.EXTRA_KEY_BRANCH }} ./extra_key
 
-    - name: Setup environment for Magisk 24.3
+    - name: patch
       run: |
         sudo apt update
-        sudo apt -y install build-essential python openssl curl wget busybox unzip
-        
-        # 安装 Python 依赖
+        sudo apt -y install build-essential python openssl curl wget busybox
         wget https://bootstrap.pypa.io/pip/2.7/get-pip.py && sudo python2.7 get-pip.py
         pip2 install pycryptodome
-        
-        # 下载指定的 Magisk 24.3 版本
-        echo "Downloading Magisk 24.3 (stable version for Android 9-10)..."
-        curl -L -o magisk.apk "https://github.com/topjohnwu/Magisk/releases/download/v24.3/Magisk-v24.3.apk"
-        
-        # 下载对应 Android 9 时代的 avbtool
-        echo "Downloading avbtool from pie-release branch..."
+        curl -o original.zip -L "${{ github.event.inputs.ZIP_URL }}"
         curl -o avbtool.tgz -L "https://android.googlesource.com/platform/external/avb/+archive/refs/heads/pie-release.tar.gz"
-        tar -xzf avbtool.tgz
-        chmod +x avbtool
-        
-        # 下载 magiskboot (v24.3 兼容版本)
-        echo "Downloading magiskboot..."
+        curl -o magisk.apk -L $(curl -s https://api.github.com/repos/topjohnwu/Magisk/releases | grep -Po -m 1 '(?<=download_url\"\: \").*Magisk.*Magisk.*apk')
         wget https://raw.githubusercontent.com/magojohnji/magiskboot-linux/main/x86_64/magiskboot
         chmod +x magiskboot
-        
-        # 下载 boot patch 脚本
-        wget https://raw.githubusercontent.com/topjohnwu/Magisk/v24.3/scripts/boot_patch.sh
-        chmod +x boot_patch.sh
-        
-        # 设置权限
         chmod +x main/*.sh
         mv main/sign.sh ./
-        
-        # 创建工作目录
-        mkdir -p working
-
-    - name: Extract and patch boot image
-      run: |
-        # 解压原始 ZIP
-        unzip -d original_firmware "${{ github.event.inputs.ZIP_URL }}" || true
-        
-        # 查找 boot.bin 或 boot.img
-        BOOT_FILE=$(find original_firmware -name "boot.bin" -o -name "boot.img" | head -1)
-        
-        if [ -z "$BOOT_FILE" ]; then
-          echo "Error: No boot.bin or boot.img found in the ZIP!"
-          exit 1
-        fi
-        
-        echo "Found boot image: $BOOT_FILE"
-        
-        # 使用 magiskboot 解包
-        ./magiskboot unpack "$BOOT_FILE"
-        
-        # 使用 Magisk 24.3 的 boot_patch.sh 打补丁
-        # 注意：24.3 版本使用不同的参数格式
-        ./boot_patch.sh boot.img
-        
-        # 如果设备是 A/B 分区，需要额外处理
-        if [ "${{ github.event.inputs.BOOT_DEVICE }}" = "A/B" ]; then
-          echo "A/B device detected, creating vendor_boot patch..."
-          # A/B 设备需要额外处理
-          ./magiskboot repack boot.img
-        else
-          echo "A-only device, standard patching complete"
-        fi
-        
-        # 打包回 bin 格式（如果需要）
-        mv new-boot.img patched_boot.bin 2>/dev/null || mv patched_boot.img patched_boot.bin
-
-    - name: Sign with custom keys (if provided)
-      if: |
-        github.event.inputs.EXTRA_KEY_TREE_URL != null
-        && github.event.inputs.EXTRA_KEY_BRANCH != null
-      run: |
-        echo "Signing with custom keys..."
-        # 复制自定义密钥
-        cp ./extra_key/* ./
-        
-        # 使用 avbtool 签名 boot 镜像
-        ./avbtool add_hash_footer \
-          --image patched_boot.bin \
-          --partition_name boot \
-          --key rsa4096_vbmeta.pem \
-          --algorithm SHA256_RSA4096 \
-          --rollback_index 0
-        
-        # 如果存在 vbmeta，也需要重新签名
-        VBMETA_FILE=$(find original_firmware -name "vbmeta.bin" -o -name "vbmeta.img" | head -1)
-        if [ -n "$VBMETA_FILE" ]; then
-          cp "$VBMETA_FILE" ./vbmeta.bin
-          ./avbtool add_hash_footer \
-            --image vbmeta.bin \
-            --partition_name vbmeta \
-            --key rsa4096_vbmeta.pem \
-            --algorithm SHA256_RSA4096 \
-            --rollback_index 0
-        fi
-
-    - name: Use Unisoc test keys (default)
-      if: |
-        github.event.inputs.EXTRA_KEY_TREE_URL == null ||
-        github.event.inputs.EXTRA_KEY_BRANCH == null
-      run: |
-        echo "Using Unisoc test keys (default)"
-        # 下载展讯平台默认测试密钥
-        wget -O testkey_rsa4096.pem "https://raw.githubusercontent.com/zhangkezhi/unisoc_keys/main/testkey_rsa4096.pem"
-        
-        # 使用展讯默认密钥签名
-        ./avbtool add_hash_footer \
-          --image patched_boot.bin \
-          --partition_name boot \
-          --key testkey_rsa4096.pem \
-          --algorithm SHA256_RSA4096 \
-          --rollback_index 0
-
-    - name: Re-pack final firmware
-      run: |
-        # 创建最终输出的 ZIP
-        mkdir -p final_output
-        
-        # 复制除原始 boot 外的所有文件
-        cp -r original_firmware/* final_output/ 2>/dev/null || true
-        rm -f final_output/boot.bin final_output/boot.img
-        
-        # 复制修改后的 boot
-        cp patched_boot.bin final_output/boot.bin 2>/dev/null || cp patched_boot.bin final_output/boot.img
-        
-        # 如果签名了 vbmeta，也复制过去
-        if [ -f vbmeta.bin ]; then
-          cp vbmeta.bin final_output/vbmeta.bin
-        fi
-        
-        # 打包
-        cd final_output
-        zip -r ../resigned.zip ./*
-        cd ..
-        
-        # 生成信息文件
-        echo "=== Magisk 24.3 Patch Info ===" > patch_info.txt
-        echo "Original ZIP: ${{ github.event.inputs.ZIP_URL }}" >> patch_info.txt
-        echo "Magisk Version: 24.3" >> patch_info.txt
-        echo "Boot Device: ${{ github.event.inputs.BOOT_DEVICE }}" >> patch_info.txt
-        echo "Patch Date: $(date)" >> patch_info.txt
-        echo "" >> patch_info.txt
-        echo "=== Device Compatibility ===" >> patch_info.txt
-        echo "- Android 9 (Pie)" >> patch_info.txt
-        echo "- Android 10 (Q)" >> patch_info.txt
-        echo "- Unisoc/Spreadtrum platforms" >> patch_info.txt
-        echo "- Linux kernel 4.14 and above" >> patch_info.txt
-        
-        zip -u resigned.zip patch_info.txt
+        ./sign.sh
 
     - name: Upload to Release
       uses: softprops/action-gh-release@v3
       with:
         files: | 
           resigned.zip
-        name: Magisk-24.3-Patched-${{ github.run_id }}
-        tag_name: magisk-24.3-${{ github.run_id }}
+        name: ${{ github.run_id }}
+        tag_name: ${{ github.run_id }}
         body: |
-          ## Magisk 24.3 Patched Firmware
-          
-          **Original ZIP:** ${{ github.event.inputs.ZIP_URL }}
-          
-          **Magisk Version:** 24.3 (Stable for Android 9-10)
-          
-          **Key Type:** ${{ github.event.inputs.EXTRA_KEY_TREE_URL != null && 'Custom Keys' || 'Unisoc Test Keys' }}
-          
-          **Boot Device Type:** ${{ github.event.inputs.BOOT_DEVICE }}
-          
-          ### Notes:
-          - This is specifically patched for **Android 9/10** devices
-          - Uses Magisk 24.3 which has better compatibility with older kernels (4.14+)
-          - If you experience bootloop, flash original firmware back via fastboot
-          
-          ### Flash Instructions:
-          1. Unzip the firmware package
-          2. Flash using your device's tool (ResearchDownload or fastboot)
-          3. After boot, install Magisk-v24.3.apk manually
-          4. For MagiskHide (if needed), use version 24.3's built-in feature
+          URL: ${{ github.event.inputs.ZIP_URL }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
