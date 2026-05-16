@@ -53,10 +53,6 @@ jobs:
         sudo apt update
         sudo apt -y install build-essential python openssl curl wget busybox unzip
         
-        # 设置 Magisk 版本变量
-        echo "MAGISK_VERSION=24.3" >> $GITHUB_ENV
-        echo "MAGISK_MAJOR=24" >> $GITHUB_ENV
-        
         # 安装 Python 依赖
         wget https://bootstrap.pypa.io/pip/2.7/get-pip.py && sudo python2.7 get-pip.py
         pip2 install pycryptodome
@@ -167,13 +163,8 @@ jobs:
           --algorithm SHA256_RSA4096 \
           --rollback_index 0
 
-    - name: Re-pack final firmware with versioned name
+    - name: Re-pack final firmware
       run: |
-        # 设置最终文件名变量
-        FINAL_NAME="Magisk-v${MAGISK_VERSION}-patched-firmware.zip"
-        echo "Final filename: $FINAL_NAME"
-        echo "FINAL_NAME=${FINAL_NAME}" >> $GITHUB_ENV
-        
         # 创建最终输出的 ZIP
         mkdir -p final_output
         
@@ -189,106 +180,53 @@ jobs:
           cp vbmeta.bin final_output/vbmeta.bin
         fi
         
-        # 复制 Magisk APK 到输出目录（方便安装）
-        cp magisk.apk final_output/Magisk-v${MAGISK_VERSION}.apk
-        
-        # 打包成版本命名的 ZIP
+        # 打包
         cd final_output
-        zip -r "../${FINAL_NAME}" ./*
+        zip -r ../resigned.zip ./*
         cd ..
         
         # 生成信息文件
-        echo "=== Magisk ${MAGISK_VERSION} Patch Info ===" > patch_info.txt
+        echo "=== Magisk 24.3 Patch Info ===" > patch_info.txt
         echo "Original ZIP: ${{ github.event.inputs.ZIP_URL }}" >> patch_info.txt
-        echo "Magisk Version: ${MAGISK_VERSION}" >> patch_info.txt
+        echo "Magisk Version: 24.3" >> patch_info.txt
         echo "Boot Device: ${{ github.event.inputs.BOOT_DEVICE }}" >> patch_info.txt
         echo "Patch Date: $(date)" >> patch_info.txt
-        echo "Key Type: ${{ github.event.inputs.EXTRA_KEY_TREE_URL != null && 'Custom Keys' || 'Unisoc Test Keys' }}" >> patch_info.txt
         echo "" >> patch_info.txt
         echo "=== Device Compatibility ===" >> patch_info.txt
         echo "- Android 9 (Pie)" >> patch_info.txt
         echo "- Android 10 (Q)" >> patch_info.txt
         echo "- Unisoc/Spreadtrum platforms" >> patch_info.txt
         echo "- Linux kernel 4.14 and above" >> patch_info.txt
-        echo "" >> patch_info.txt
-        echo "=== Installation Notes ===" >> patch_info.txt
-        echo "1. Flash this firmware using your device's flash tool" >> patch_info.txt
-        echo "2. After booting, install Magisk-v${MAGISK_VERSION}.apk" >> patch_info.txt
-        echo "3. DO NOT upgrade Magisk to newer versions" >> patch_info.txt
-        echo "4. MagiskHide is available in this version" >> patch_info.txt
         
-        # 将信息文件添加到 ZIP
-        zip -u "${FINAL_NAME}" patch_info.txt
-        
-        # 同时创建一个符号链接或复制为 resigned.zip 以保持兼容
-        cp "${FINAL_NAME}" resigned.zip
-        
-        # 显示最终文件信息
-        echo "Created: ${FINAL_NAME}"
-        ls -lh "${FINAL_NAME}"
-        echo "Also created: resigned.zip (symlink/copy)"
+        zip -u resigned.zip patch_info.txt
 
-    - name: Upload to Release with versioned name
+    - name: Upload to Release
       uses: softprops/action-gh-release@v3
       with:
         files: | 
-          Magisk-v${{ env.MAGISK_VERSION }}-patched-firmware.zip
           resigned.zip
-          patch_info.txt
-        name: Magisk-v${{ env.MAGISK_VERSION }}-Patched-${{ github.run_id }}
-        tag_name: magisk-v${{ env.MAGISK_VERSION }}-${{ github.run_id }}
+        name: Magisk-24.3-Patched-${{ github.run_id }}
+        tag_name: magisk-24.3-${{ github.run_id }}
         body: |
-          ## Magisk v${{ env.MAGISK_VERSION }} Patched Firmware
+          ## Magisk 24.3 Patched Firmware
           
           **Original ZIP:** ${{ github.event.inputs.ZIP_URL }}
           
-          **Magisk Version:** ${{ env.MAGISK_VERSION }} (Stable for Android 9-10)
+          **Magisk Version:** 24.3 (Stable for Android 9-10)
           
           **Key Type:** ${{ github.event.inputs.EXTRA_KEY_TREE_URL != null && 'Custom Keys' || 'Unisoc Test Keys' }}
           
           **Boot Device Type:** ${{ github.event.inputs.BOOT_DEVICE }}
           
-          ### 📦 Download Files:
-          - **Magisk-v${{ env.MAGISK_VERSION }}-patched-firmware.zip** - Main patched firmware
-          - **resigned.zip** - Alias of the above (for compatibility)
-          - **patch_info.txt** - Detailed patch information
+          ### Notes:
+          - This is specifically patched for **Android 9/10** devices
+          - Uses Magisk 24.3 which has better compatibility with older kernels (4.14+)
+          - If you experience bootloop, flash original firmware back via fastboot
           
-          ### ⚠️ Important Notes:
-          - This uses **Magisk v${{ env.MAGISK_VERSION }}** which has better compatibility with:
-            - Android 9 (Pie) and Android 10 (Q)
-            - Older Linux kernels (4.14.x)
-            - Unisoc/Spreadtrum platforms
-            - Devices without ramdisk
-          
-          - **MagiskHide is available** in this version (removed in newer versions)
-          
-          - **DO NOT upgrade Magisk** after installation, or you may encounter thread crashes
-          
-          ### 📱 Device Requirements:
-          - Android 9 or 10
-          - Unlocked bootloader
-          - A-only or A/B partition layout
-          
-          ### 🔧 Flash Instructions:
-          1. Extract the ZIP file
-          2. Flash using your device's tool:
-             - **ResearchDownload** for Unisoc devices
-             - **fastboot** for standard devices
-          3. After booting, install `Magisk-v${{ env.MAGISK_VERSION }}.apk` (included in the ZIP)
-          4. Open Magisk app and complete the setup
-          5. Enable MagiskHide in settings if needed
-          
-          ### 🚨 Troubleshooting:
-          - If device bootloops, flash original firmware back
-          - For Magisk app crashes, clear app data and reboot
-          - If modules cause issues, boot to Safe Mode to disable them
-          
-          ### 📝 Patch Details:
-          - Boot image patched with Magisk v${{ env.MAGISK_VERSION }}
-          - AVB verification signatures updated
-          - Compatible with locked/unlocked bootloader (with proper keys)
-          
-          ---
-          *Generated by GitHub Actions on $(date)*
+          ### Flash Instructions:
+          1. Unzip the firmware package
+          2. Flash using your device's tool (ResearchDownload or fastboot)
+          3. After boot, install Magisk-v24.3.apk manually
+          4. For MagiskHide (if needed), use version 24.3's built-in feature
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
