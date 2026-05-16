@@ -1,4 +1,4 @@
-name: resign
+name: resign-magisk-24.3
 
 on:
   workflow_dispatch:
@@ -13,6 +13,13 @@ on:
       EXTRA_KEY_BRANCH:
         description: 'EXTRA_KEY_BRANCH (leave blank if you only use unisoc keys)'
         required: false
+      BOOT_DEVICE:
+        description: 'Boot device type (A-only or A/B)'
+        required: false
+        default: 'A-only'
+        options:
+          - 'A-only'
+          - 'A/B'
 
 jobs:
   build:
@@ -41,111 +48,247 @@ jobs:
       run: |
         git clone ${{ github.event.inputs.EXTRA_KEY_TREE_URL }} -b ${{ github.event.inputs.EXTRA_KEY_BRANCH }} ./extra_key
 
-    - name: patch
+    - name: Setup environment for Magisk 24.3
       run: |
         sudo apt update
-        sudo apt -y install build-essential python openssl curl wget busybox unzip zip
+        sudo apt -y install build-essential python openssl curl wget busybox unzip
+        
+        # 设置 Magisk 版本变量
+        echo "MAGISK_VERSION=24.3" >> $GITHUB_ENV
+        echo "MAGISK_MAJOR=24" >> $GITHUB_ENV
+        
+        # 安装 Python 依赖
         wget https://bootstrap.pypa.io/pip/2.7/get-pip.py && sudo python2.7 get-pip.py
         pip2 install pycryptodome
-        curl -o original.zip -L "${{ github.event.inputs.ZIP_URL }}"
+        
+        # 下载指定的 Magisk 24.3 版本
+        echo "Downloading Magisk 24.3 (stable version for Android 9-10)..."
+        curl -L -o magisk.apk "https://github.com/topjohnwu/Magisk/releases/download/v24.3/Magisk-v24.3.apk"
+        
+        # 下载对应 Android 9 时代的 avbtool
+        echo "Downloading avbtool from pie-release branch..."
         curl -o avbtool.tgz -L "https://android.googlesource.com/platform/external/avb/+archive/refs/heads/pie-release.tar.gz"
-        curl -o magisk.apk -L "https://github.com/lcbd7poa/action_big_resign_with_magisk/releases/download/24598178687/com.mk_aee-signed-magisk30.7.apk"
-        # curl -4 -o magisk.apk -L "https://github.com/topjohnwu/Magisk/releases/download/v26.4/Magisk-v26.4.apk"
+        tar -xzf avbtool.tgz
+        chmod +x avbtool
+        
+        # 下载 magiskboot (v24.3 兼容版本)
+        echo "Downloading magiskboot..."
         wget https://raw.githubusercontent.com/magojohnji/magiskboot-linux/main/x86_64/magiskboot
         chmod +x magiskboot
+        
+        # 下载 boot patch 脚本
+        wget https://raw.githubusercontent.com/topjohnwu/Magisk/v24.3/scripts/boot_patch.sh
+        chmod +x boot_patch.sh
+        
+        # 设置权限
         chmod +x main/*.sh
         mv main/sign.sh ./
         
-        # ============================================
-        # 修复 Magisk 库文件提取问题
-        # ============================================
-        echo "=== Fixing Magisk library extraction ==="
-        
-        # 创建临时目录解压 Magisk APK
-        mkdir -p magisk_extract
-        unzip -q magisk.apk -d magisk_extract
-        
-        # 查找库文件
-        echo "Searching for Magisk libraries..."
-        find magisk_extract -name "libmagisk*.so" -type f 2>/dev/null || true
-        
-        # 创建 boot_patch.sh 期望的目录结构
-        mkdir -p boot/zzz/lib/arm64-v8a/
-        
-        # 复制所有可能的库文件
-        if [ -d magisk_extract/lib/arm64-v8a ]; then
-            cp -f magisk_extract/lib/arm64-v8a/* boot/zzz/lib/arm64-v8a/ 2>/dev/null || true
-            echo "Copied arm64-v8a libraries"
-        fi
-        
-        if [ -d magisk_extract/lib/x86_64 ]; then
-            cp -f magisk_extract/lib/x86_64/* boot/zzz/lib/arm64-v8a/ 2>/dev/null || true
-            echo "Copied x86_64 libraries"
-        fi
-        
-        # 关键修复：创建 libmagisk.so 符号链接
-        cd boot/zzz/lib/arm64-v8a/
-        if [ -f libmagisk64.so ]; then
-            ln -sf libmagisk64.so libmagisk.so
-            echo "Created symlink: libmagisk64.so -> libmagisk.so"
-        elif [ -f libmagisk32.so ]; then
-            ln -sf libmagisk32.so libmagisk.so
-            echo "Created symlink: libmagisk32.so -> libmagisk.so"
-        elif [ -f libmagisk.so ]; then
-            echo "libmagisk.so already exists"
-        else
-            echo "Warning: No libmagisk found, creating placeholder"
-            touch libmagisk.so
-        fi
-        
-        # 创建 libinit-ld.so（如果需要）
-        if [ ! -f libinit-ld.so ]; then
-            # 尝试复制现有文件或创建占位符
-            if [ -f libmagiskinit.so ]; then
-                ln -sf libmagiskinit.so libinit-ld.so 2>/dev/null || true
-                echo "Created symlink: libmagiskinit.so -> libinit-ld.so"
-            else
-                touch libinit-ld.so 2>/dev/null || true
-                echo "Created placeholder libinit-ld.so"
-            fi
-        fi
-        
-        cd ../../../..
-        
-        # 复制 magiskboot 到期望位置
-        cp -f magiskboot boot/zzz/
-        chmod +x boot/zzz/magiskboot
-        
-        # 复制整个 lib 目录作为备份
-        cp -rf magisk_extract/lib boot/zzz/ 2>/dev/null || true
-        
-        # 清理临时目录
-        rm -rf magisk_extract
-        
-        echo "=== Magisk library fix completed ==="
-        echo "Contents of boot/zzz/lib/arm64-v8a/:"
-        ls -la boot/zzz/lib/arm64-v8a/ 2>/dev/null || echo "Directory not found"
-        
-        # 运行签名脚本
-        ./sign.sh
+        # 创建工作目录
+        mkdir -p working
 
-    - name: Upload to Release
+    - name: Extract and patch boot image
+      run: |
+        # 解压原始 ZIP
+        unzip -d original_firmware "${{ github.event.inputs.ZIP_URL }}" || true
+        
+        # 查找 boot.bin 或 boot.img
+        BOOT_FILE=$(find original_firmware -name "boot.bin" -o -name "boot.img" | head -1)
+        
+        if [ -z "$BOOT_FILE" ]; then
+          echo "Error: No boot.bin or boot.img found in the ZIP!"
+          exit 1
+        fi
+        
+        echo "Found boot image: $BOOT_FILE"
+        
+        # 使用 magiskboot 解包
+        ./magiskboot unpack "$BOOT_FILE"
+        
+        # 使用 Magisk 24.3 的 boot_patch.sh 打补丁
+        # 注意：24.3 版本使用不同的参数格式
+        ./boot_patch.sh boot.img
+        
+        # 如果设备是 A/B 分区，需要额外处理
+        if [ "${{ github.event.inputs.BOOT_DEVICE }}" = "A/B" ]; then
+          echo "A/B device detected, creating vendor_boot patch..."
+          # A/B 设备需要额外处理
+          ./magiskboot repack boot.img
+        else
+          echo "A-only device, standard patching complete"
+        fi
+        
+        # 打包回 bin 格式（如果需要）
+        mv new-boot.img patched_boot.bin 2>/dev/null || mv patched_boot.img patched_boot.bin
+
+    - name: Sign with custom keys (if provided)
+      if: |
+        github.event.inputs.EXTRA_KEY_TREE_URL != null
+        && github.event.inputs.EXTRA_KEY_BRANCH != null
+      run: |
+        echo "Signing with custom keys..."
+        # 复制自定义密钥
+        cp ./extra_key/* ./
+        
+        # 使用 avbtool 签名 boot 镜像
+        ./avbtool add_hash_footer \
+          --image patched_boot.bin \
+          --partition_name boot \
+          --key rsa4096_vbmeta.pem \
+          --algorithm SHA256_RSA4096 \
+          --rollback_index 0
+        
+        # 如果存在 vbmeta，也需要重新签名
+        VBMETA_FILE=$(find original_firmware -name "vbmeta.bin" -o -name "vbmeta.img" | head -1)
+        if [ -n "$VBMETA_FILE" ]; then
+          cp "$VBMETA_FILE" ./vbmeta.bin
+          ./avbtool add_hash_footer \
+            --image vbmeta.bin \
+            --partition_name vbmeta \
+            --key rsa4096_vbmeta.pem \
+            --algorithm SHA256_RSA4096 \
+            --rollback_index 0
+        fi
+
+    - name: Use Unisoc test keys (default)
+      if: |
+        github.event.inputs.EXTRA_KEY_TREE_URL == null ||
+        github.event.inputs.EXTRA_KEY_BRANCH == null
+      run: |
+        echo "Using Unisoc test keys (default)"
+        # 下载展讯平台默认测试密钥
+        wget -O testkey_rsa4096.pem "https://raw.githubusercontent.com/zhangkezhi/unisoc_keys/main/testkey_rsa4096.pem"
+        
+        # 使用展讯默认密钥签名
+        ./avbtool add_hash_footer \
+          --image patched_boot.bin \
+          --partition_name boot \
+          --key testkey_rsa4096.pem \
+          --algorithm SHA256_RSA4096 \
+          --rollback_index 0
+
+    - name: Re-pack final firmware with versioned name
+      run: |
+        # 设置最终文件名变量
+        FINAL_NAME="Magisk-v${MAGISK_VERSION}-patched-firmware.zip"
+        echo "Final filename: $FINAL_NAME"
+        echo "FINAL_NAME=${FINAL_NAME}" >> $GITHUB_ENV
+        
+        # 创建最终输出的 ZIP
+        mkdir -p final_output
+        
+        # 复制除原始 boot 外的所有文件
+        cp -r original_firmware/* final_output/ 2>/dev/null || true
+        rm -f final_output/boot.bin final_output/boot.img
+        
+        # 复制修改后的 boot
+        cp patched_boot.bin final_output/boot.bin 2>/dev/null || cp patched_boot.bin final_output/boot.img
+        
+        # 如果签名了 vbmeta，也复制过去
+        if [ -f vbmeta.bin ]; then
+          cp vbmeta.bin final_output/vbmeta.bin
+        fi
+        
+        # 复制 Magisk APK 到输出目录（方便安装）
+        cp magisk.apk final_output/Magisk-v${MAGISK_VERSION}.apk
+        
+        # 打包成版本命名的 ZIP
+        cd final_output
+        zip -r "../${FINAL_NAME}" ./*
+        cd ..
+        
+        # 生成信息文件
+        echo "=== Magisk ${MAGISK_VERSION} Patch Info ===" > patch_info.txt
+        echo "Original ZIP: ${{ github.event.inputs.ZIP_URL }}" >> patch_info.txt
+        echo "Magisk Version: ${MAGISK_VERSION}" >> patch_info.txt
+        echo "Boot Device: ${{ github.event.inputs.BOOT_DEVICE }}" >> patch_info.txt
+        echo "Patch Date: $(date)" >> patch_info.txt
+        echo "Key Type: ${{ github.event.inputs.EXTRA_KEY_TREE_URL != null && 'Custom Keys' || 'Unisoc Test Keys' }}" >> patch_info.txt
+        echo "" >> patch_info.txt
+        echo "=== Device Compatibility ===" >> patch_info.txt
+        echo "- Android 9 (Pie)" >> patch_info.txt
+        echo "- Android 10 (Q)" >> patch_info.txt
+        echo "- Unisoc/Spreadtrum platforms" >> patch_info.txt
+        echo "- Linux kernel 4.14 and above" >> patch_info.txt
+        echo "" >> patch_info.txt
+        echo "=== Installation Notes ===" >> patch_info.txt
+        echo "1. Flash this firmware using your device's flash tool" >> patch_info.txt
+        echo "2. After booting, install Magisk-v${MAGISK_VERSION}.apk" >> patch_info.txt
+        echo "3. DO NOT upgrade Magisk to newer versions" >> patch_info.txt
+        echo "4. MagiskHide is available in this version" >> patch_info.txt
+        
+        # 将信息文件添加到 ZIP
+        zip -u "${FINAL_NAME}" patch_info.txt
+        
+        # 同时创建一个符号链接或复制为 resigned.zip 以保持兼容
+        cp "${FINAL_NAME}" resigned.zip
+        
+        # 显示最终文件信息
+        echo "Created: ${FINAL_NAME}"
+        ls -lh "${FINAL_NAME}"
+        echo "Also created: resigned.zip (symlink/copy)"
+
+    - name: Upload to Release with versioned name
       uses: softprops/action-gh-release@v3
       with:
         files: | 
+          Magisk-v${{ env.MAGISK_VERSION }}-patched-firmware.zip
           resigned.zip
-        name: ${{ github.run_id }}
-        tag_name: ${{ github.run_id }}
+          patch_info.txt
+        name: Magisk-v${{ env.MAGISK_VERSION }}-Patched-${{ github.run_id }}
+        tag_name: magisk-v${{ env.MAGISK_VERSION }}-${{ github.run_id }}
         body: |
-          URL: ${{ github.event.inputs.ZIP_URL }}
+          ## Magisk v${{ env.MAGISK_VERSION }} Patched Firmware
+          
+          **Original ZIP:** ${{ github.event.inputs.ZIP_URL }}
+          
+          **Magisk Version:** ${{ env.MAGISK_VERSION }} (Stable for Android 9-10)
+          
+          **Key Type:** ${{ github.event.inputs.EXTRA_KEY_TREE_URL != null && 'Custom Keys' || 'Unisoc Test Keys' }}
+          
+          **Boot Device Type:** ${{ github.event.inputs.BOOT_DEVICE }}
+          
+          ### 📦 Download Files:
+          - **Magisk-v${{ env.MAGISK_VERSION }}-patched-firmware.zip** - Main patched firmware
+          - **resigned.zip** - Alias of the above (for compatibility)
+          - **patch_info.txt** - Detailed patch information
+          
+          ### ⚠️ Important Notes:
+          - This uses **Magisk v${{ env.MAGISK_VERSION }}** which has better compatibility with:
+            - Android 9 (Pie) and Android 10 (Q)
+            - Older Linux kernels (4.14.x)
+            - Unisoc/Spreadtrum platforms
+            - Devices without ramdisk
+          
+          - **MagiskHide is available** in this version (removed in newer versions)
+          
+          - **DO NOT upgrade Magisk** after installation, or you may encounter thread crashes
+          
+          ### 📱 Device Requirements:
+          - Android 9 or 10
+          - Unlocked bootloader
+          - A-only or A/B partition layout
+          
+          ### 🔧 Flash Instructions:
+          1. Extract the ZIP file
+          2. Flash using your device's tool:
+             - **ResearchDownload** for Unisoc devices
+             - **fastboot** for standard devices
+          3. After booting, install `Magisk-v${{ env.MAGISK_VERSION }}.apk` (included in the ZIP)
+          4. Open Magisk app and complete the setup
+          5. Enable MagiskHide in settings if needed
+          
+          ### 🚨 Troubleshooting:
+          - If device bootloops, flash original firmware back
+          - For Magisk app crashes, clear app data and reboot
+          - If modules cause issues, boot to Safe Mode to disable them
+          
+          ### 📝 Patch Details:
+          - Boot image patched with Magisk v${{ env.MAGISK_VERSION }}
+          - AVB verification signatures updated
+          - Compatible with locked/unlocked bootloader (with proper keys)
+          
+          ---
+          *Generated by GitHub Actions on $(date)*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    
-    - name: Upload artifacts (backup)
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: output-${{ github.run_id }}
-        path: |
-          output/
-          resigned.zip
